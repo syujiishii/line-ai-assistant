@@ -239,12 +239,13 @@ async function main() {
       range: range(sheetId, 6, 9, 1, 3),
       cell: {
         userEnteredFormat: {
+          horizontalAlignment: 'LEFT',
           verticalAlignment: 'MIDDLE',
           textFormat: { fontSize: 11 },
           padding: { left: 8, right: 8, top: 0, bottom: 0 },
         },
       },
-      fields: 'userEnteredFormat(verticalAlignment,textFormat,padding)',
+      fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat,padding)',
     },
   });
   // 罫線 A7:C9
