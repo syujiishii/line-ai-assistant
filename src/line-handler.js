@@ -1,6 +1,11 @@
 // LINE Messaging API のイベントハンドラ
 const line = require('@line/bot-sdk');
 const { chat } = require('./claude');
+const {
+  selectProposalRaw,
+  generateProposalsRaw,
+} = require('./tools/threads-post');
+const { buildProposalsMessage, slotLabel } = require('./flex-templates');
 
 const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET,
@@ -15,6 +20,11 @@ const ERROR_MESSAGE = 'エラーが発生しました。もう一度お試しく
  * LINE Webhookイベントを処理する
  */
 async function handleEvent(event) {
+  // postback（Flex Messageのボタン押下）
+  if (event.type === 'postback') {
+    return await handlePostback(event);
+  }
+
   // テキストメッセージ以外（スタンプ、画像など）は無視
   if (event.type !== 'message' || event.message.type !== 'text') {
     return;
@@ -48,6 +58,71 @@ async function handleEvent(event) {
 }
 
 /**
+ * postback イベント処理
+ *  data 例:
+ *    "select:POST007"     → その案を採用
+ *    "regenerate:morning" → 別案を再生成
+ *    "skip:morning"       → スロットスキップ
+ */
+async function handlePostback(event) {
+  const data = (event.postback && event.postback.data) || '';
+  console.log(`[LINE postback] ${data}`);
+
+  try {
+    if (data.startsWith('select:')) {
+      const postId = data.slice('select:'.length);
+      const message = await selectProposalRaw(postId);
+      await lineClient.replyMessage(event.replyToken, { type: 'text', text: message });
+      return;
+    }
+
+    if (data.startsWith('regenerate:')) {
+      const slot = data.slice('regenerate:'.length) || 'morning';
+      // ack的に先に短いメッセージ
+      await lineClient.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '別案つくるで。ちょい待ち...',
+      });
+      // 生成→pushで送る
+      const result = await generateProposalsRaw(slot);
+      if (result.proposals && result.proposals.length > 0) {
+        await lineClient.pushMessage(
+          event.source.userId,
+          buildProposalsMessage(result.proposals, slot),
+        );
+      } else {
+        await lineClient.pushMessage(event.source.userId, {
+          type: 'text', text: '案を生成できんかったわ。知識ベース確認して。',
+        });
+      }
+      return;
+    }
+
+    if (data.startsWith('skip:')) {
+      const slot = data.slice('skip:'.length);
+      await lineClient.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `${slotLabel(slot)}はスキップやな。次に期待やで。`,
+      });
+      return;
+    }
+
+    // 未知の postback
+    await lineClient.replyMessage(event.replyToken, {
+      type: 'text', text: '不明なアクションやで',
+    });
+  } catch (err) {
+    console.error('postback処理エラー:', err);
+    try {
+      await lineClient.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `${ERROR_MESSAGE}（${err.message || err}）`,
+      });
+    } catch (_e) { /* replyToken切れの場合などは無視 */ }
+  }
+}
+
+/**
  * 指定ユーザーへ能動的にメッセージを送る（cron通知などで使用）
  */
 async function pushToUser(userId, text) {
@@ -64,6 +139,8 @@ async function pushToUser(userId, text) {
 
 module.exports = {
   handleEvent,
+  handlePostback,
   pushToUser,
   lineConfig,
+  lineClient,
 };

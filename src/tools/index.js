@@ -6,6 +6,7 @@ const calendar = require('./calendar');
 const invoice = require('./invoice');
 const instagram = require('./instagram');
 const tasks = require('./tasks');
+const { threadsTools, executeThreadsTool } = require('./threads-post');
 
 // ---------- Claude に渡すツールの JSON Schema 定義 ----------
 const toolDefinitions = [
@@ -129,10 +130,20 @@ const toolDefinitions = [
       required: ['row_index'],
     },
   },
+  // Threads投稿モジュールのツールをスプレッド
+  ...threadsTools,
 ];
+
+// Threadsツール名のセット（ディスパッチ振り分け用）
+const _threadsToolNames = new Set(threadsTools.map((t) => t.name));
 
 // ---------- ツール実行ディスパッチャ ----------
 async function executeTool(name, input) {
+  // Threadsツールは別ディスパッチャに委譲
+  if (_threadsToolNames.has(name)) {
+    return await executeThreadsTool(name, input);
+  }
+
   switch (name) {
     case 'get_today_schedule':
       return await calendar.getScheduleForDate(input.date || null);
